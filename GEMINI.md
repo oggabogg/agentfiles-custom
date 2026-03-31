@@ -11,6 +11,7 @@ Dette er en tilpasset versjon av Obsidian-utvidelsen Agentfiles, optimalisert fo
 ## Implementert funksjonalitet
 - **Gemini Context Tax**: Sporer tokens for både global `Memory` (~/.gemini/GEMINI.md) og lokal `GEMINI.md` i vaulten.
 - **Gemini Skill Usage**: Skanner chat-logger i `~/.gemini/tmp/fredrikskauen/chats/` for å telle bruk av ferdigheter.
+- **Core Tool Filtering**: Filtrerer bort innebygde Gemini-verktøy (som `run_shell_command`, `read_file`, osv.) fra "Top Skills"-listen ved å bruke `DashboardPanel.CORE_TOOLS`-svartelisten i `src/views/dashboard.ts`.
 - **Logikken ligger i**: `src/skillkit.ts` (datafangst) og `src/views/dashboard.ts` (visning).
 
 ## Utvikler-miljø

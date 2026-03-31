@@ -75,6 +75,9 @@ function loadData(): DashboardData {
 		context.always_loaded.skill_metadata_tokens || 500;
 
 	if (stats && stats.top_skills) {
+		// Filter ut kjerne-verktøy fra skillkit-data
+		stats.top_skills = stats.top_skills.filter(s => !DashboardPanel.CORE_TOOLS.has(s.name));
+
 		geminiUsage.forEach((count, name) => {
 			const existing = stats.top_skills.find(s => s.name === name);
 			if (existing) existing.total += count;
@@ -138,6 +141,10 @@ export class DashboardPanel {
 		}
 
 		if (cachedData) {
+			// Sørg for at cached data også blir filtrert
+			if (cachedData.stats && cachedData.stats.top_skills) {
+				cachedData.stats.top_skills = cachedData.stats.top_skills.filter(s => !DashboardPanel.CORE_TOOLS.has(s.name));
+			}
 			this.renderDashboard(cachedData);
 		} else {
 			const loading = this.containerEl.createDiv("as-dash-loading");
@@ -154,6 +161,29 @@ export class DashboardPanel {
 			}, 10);
 		}
 	}
+
+	public static CORE_TOOLS = new Set([
+		"run_shell_command",
+		"read_file",
+		"read_many_files",
+		"write_file",
+		"replace",
+		"list_directory",
+		"glob",
+		"grep_search",
+		"web_fetch",
+		"google_web_search",
+		"ask_user",
+		"enter_plan_mode",
+		"exit_plan_mode",
+		"write_todos",
+		"get_internal_docs",
+		"codebase_investigator",
+		"cli_help",
+		"generalist",
+		"activate_skill",
+		"save_memory"
+	]);
 
 
 	private renderDashboard(data: DashboardData): void {
