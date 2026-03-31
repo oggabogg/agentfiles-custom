@@ -91,6 +91,11 @@ function enrichDataWithGemini(data: DashboardData): void {
 		});
 		// Oppdater unused_30d (som er de som aldri er trigget)
 		data.health.usage.unused_30d = data.health.usage.never_used.length;
+
+		// Juster metadata-budsjett for Gemini CLI (standard skillkit budsjett på 16k er altfor lavt for Gemini)
+		// Gemini støtter 32k tokens i system instructions, 100k tegn er et trygt anslag (~25k tokens)
+		data.health.metadata.budget = 100000;
+		data.health.metadata.pct = Math.round((data.health.metadata.total_chars / data.health.metadata.budget) * 100);
 	}
 }
 
