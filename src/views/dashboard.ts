@@ -1,6 +1,6 @@
 import { Notice, setIcon, type App } from "obsidian";
 import { shell } from "electron";
-import { isSkillkitAvailable, runSkillkitJson, runSkillkitAction } from "../skillkit";import { getGeminiContextTax, getGeminiSkillUsage } from "../skillkit";
+import * as skillkit from "../skillkit";
 import { updateAllSkillsAsync } from "../marketplace";
 import { showConfirmModal } from "./confirm-modal";
 
@@ -47,19 +47,30 @@ interface DashboardData {
 }
 
 function enrichDataWithGemini(data: DashboardData): void {
-	const geminiTax = getGeminiContextTax();
-	const geminiUsage = getGeminiSkillUsage();
-	const geminiBurn = getGeminiBurn();
+	const geminiTax = skillkit.getGeminiContextTax();
+	const geminiUsage = skillkit.getGeminiSkillUsage();
+	const geminiBurn = skillkit.getGeminiBurn();
+
+	// Migrer fra singular 'burn' til 'burns' array for gammel cache-kompatibilitet
+	if (!data.burns) {
+		const oldBurn = (data as any).burn;
+		data.burns = oldBurn ? [oldBurn] : [];
+	}
 
 	// Legg til Gemini i burns hvis den ikke er der allerede
-	if (!data.burns.find(b => b.agent === "Gemini CLI")) {
+	if (!data.burns.find(b => b && b.agent === "Gemini CLI")) {
 		data.burns.push(geminiBurn);
 	}
 
 	if (data.context) {
+		const claudeBurn = data.burns.find(b => b.agent === "Claude Code");
+		
 		data.context.always_loaded.memory_tokens = geminiTax.memory || 0;
 		data.context.always_loaded.gemini_md_tokens = geminiTax.geminiMd || 0;
 		data.context.always_loaded.claude_md_tokens = geminiTax.claudeMd || data.context.always_loaded.claude_md_tokens || 0;
+		
+		// Vi legger til tokens brukt i denne perioden for å vise "tax" mer dynamisk hvis ønskelig, 
+		// men for nå holder vi oss til de "always loaded" tokens som før.
 		data.context.always_loaded.total_tokens = 
 			data.context.always_loaded.claude_md_tokens + 
 			data.context.always_loaded.gemini_md_tokens + 
@@ -106,10 +117,19 @@ function enrichDataWithGemini(data: DashboardData): void {
 }
 
 function loadData(): DashboardData {
-	const stats = runSkillkitJson("stats") as StatsJson | null;
-	const health = runSkillkitJson("health") as HealthJson | null;
-	const burnArr = runSkillkitJson("burn") as BurnAgent[] | null;
-	let context = runSkillkitJson("context") as ContextJson | null;
+	const stats = skillkit.runSkillkitJson("stats") as StatsJson | null;
+	const health = skillkit.runSkillkitJson("health") as HealthJson | null;
+	const burnRaw = skillkit.runSkillkitJson("burn");
+	let context = skillkit.runSkillkitJson("context") as ContextJson | null;
+
+	const burns: BurnAgent[] = [];
+	if (burnRaw) {
+		if (Array.isArray(burnRaw)) {
+			burns.push(...burnRaw);
+		} else {
+			burns.push(burnRaw as BurnAgent);
+		}
+	}
 
 	if (!context) {
 		context = {
@@ -123,7 +143,7 @@ function loadData(): DashboardData {
 	const data = {
 		stats,
 		health,
-		burns: burnArr || [],
+		burns,
 		context,
 	};
 
@@ -172,7 +192,7 @@ export class DashboardPanel {
 		this.containerEl.empty();
 		this.containerEl.addClass("as-dashboard");
 
-		if (!isSkillkitAvailable()) {
+		if (!skillkit.isSkillkitAvailable()) {
 			this.renderNoSkillkit();
 			return;
 		}
@@ -250,8 +270,9 @@ export class DashboardPanel {
 			if (data.context) this.renderContext(data.context, row);
 		}
 		
-		for (const burn of data.burns) {
-			this.renderBurn(burn);
+		const burns = data.burns || [];
+		for (const burn of burns) {
+			if (burn) this.renderBurn(burn);
 		}
 
 		if (data.health) this.renderStale(data.health);
@@ -292,7 +313,7 @@ export class DashboardPanel {
 			scanBtn.setText("Scanning...");
 			scanBtn.disabled = true;
 			setTimeout(() => {
-				const result = runSkillkitAction("scan");
+				const result = skillkit.runSkillkitAction("scan");
 				if (result.success) {
 					new Notice("Scan complete", 5000);
 					cachedData = null;
@@ -313,7 +334,7 @@ export class DashboardPanel {
 					pruneBtn.setText("Pruning...");
 					pruneBtn.disabled = true;
 					setTimeout(() => {
-						const result = runSkillkitAction("prune --yes");
+						const result = skillkit.runSkillkitAction("prune --yes");
 						if (result.success) {
 							new Notice("Pruned stale skills", 5000);
 							cachedData = null;
@@ -463,15 +484,18 @@ export class DashboardPanel {
 		const last14 = burn.by_day.slice(-14);
 		if (last14.length === 0) return;
 
-		const maxCost = Math.max(...last14.map((d) => d.costUsd), 1);
+		const useCalls = burn.cost.total === 0;
+		const maxValue = Math.max(...last14.map((d) => useCalls ? d.apiCalls : d.costUsd), 1);
 		const chart = section.createDiv("as-burn-chart");
 
 		for (const day of last14) {
 			const col = chart.createDiv("as-burn-col");
 			const bar = col.createDiv("as-burn-bar");
-			const height = Math.max(2, (day.costUsd / maxCost) * 100);
+			const val = useCalls ? day.apiCalls : day.costUsd;
+			const height = Math.max(2, (val / maxValue) * 100);
 			bar.setCssProps({ "--bar-h": `${height}%` });
-			bar.title = `${day.date}: $${day.costUsd.toFixed(0)}`;
+			const costStr = day.costUsd < 1 && day.costUsd > 0 ? day.costUsd.toFixed(2) : day.costUsd.toFixed(0);
+			bar.title = `${day.date}: ${useCalls ? day.apiCalls + " calls" : "$" + costStr}`;
 			col.createDiv({ cls: "as-burn-date", text: day.date.slice(8) });
 		}
 	}

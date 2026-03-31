@@ -283,35 +283,35 @@ export function getGeminiBurn(): GeminiBurn {
 	for (const file of files) {
 		try {
 			const filePath = path.join(chatsDir, file);
-			const stats = fs.statSync(filePath);
-			if (stats.mtimeMs < thirtyDaysAgo) continue;
-
 			const chat = JSON.parse(fs.readFileSync(filePath, "utf-8"));
-			burn.period.sessions++;
+			
+			// Bruk startTime fra JSON hvis mulig, ellers filens mtime
+			const startTime = chat.startTime ? new Date(chat.startTime) : fs.statSync(filePath).mtime;
+			if (startTime.getTime() < thirtyDaysAgo) continue;
 
-			if (chat && chat.messages) {
+			burn.period.sessions++;
+			const date = startTime.toISOString().split("T")[0];
+
+			if (chat.messages) {
 				chat.messages.forEach((msg: any) => {
-					if (msg.role === "model" && msg.tokens) {
+					const isGemini = msg.type === "gemini" || msg.role === "model" || msg.role === "assistant";
+					if (isGemini && msg.tokens) {
 						burn.period.api_calls++;
 						const t = msg.tokens;
 						burn.tokens.input += t.input || 0;
 						burn.tokens.output += t.output || 0;
-						burn.tokens.cache_creation += t.cached || 0; // Gemini kaller det ofte bare cached
-						burn.tokens.cache_read += 0; // Gemini CLI har ikke separat cache_read i loggene ennå
+						burn.tokens.cache_creation += t.cached || 0;
 
-						// Estimer kostnad (veldig grovt for Gemini 1.5 Pro/Flash)
-						// 1.5 Pro: $1.25 / 1M input, $3.75 / 1M output (over 128k)
-						// Vi bruker en forenklet snittpris for nå: $1 / 1M tokens
-						const model = msg.model || "gemini-1.5-pro";
-						const cost = ((t.input || 0) + (t.output || 0) + (t.cached || 0)) * 0.000002; // $2 pr million tokens som snitt
+						// Estimer kostnad: $2 per million tokens i snitt
+						const cost = ((t.input || 0) + (t.output || 0) + (t.cached || 0)) * 0.000002;
 						burn.cost.total += cost;
 
-						const date = stats.mtime.toISOString().split("T")[0];
 						const day = dayMap.get(date) || { cost: 0, calls: 0 };
 						day.cost += cost;
 						day.calls++;
 						dayMap.set(date, day);
 
+						const model = msg.model || chat.model || "gemini-1.5-pro";
 						const mod = modelMap.get(model) || { cost: 0, calls: 0 };
 						mod.cost += cost;
 						mod.calls++;
