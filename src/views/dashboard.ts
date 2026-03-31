@@ -1,6 +1,6 @@
 import { Notice, setIcon, type App } from "obsidian";
 import { shell } from "electron";
-import { isSkillkitAvailable, runSkillkitJson, runSkillkitAction } from "../skillkit";
+import { isSkillkitAvailable, runSkillkitJson, runSkillkitAction } from "../skillkit";import { getGeminiContextTax, getGeminiSkillUsage } from "../skillkit";
 import { updateAllSkillsAsync } from "../marketplace";
 import { showConfirmModal } from "./confirm-modal";
 
@@ -33,7 +33,7 @@ interface BurnAgent {
 }
 
 interface ContextJson {
-	always_loaded: { total_tokens: number; claude_md_tokens: number; skill_metadata_tokens: number; memory_tokens: number };
+	always_loaded: { total_tokens: number; claude_md_tokens: number; skill_metadata_tokens: number; memory_tokens: number; gemini_md_tokens: number };
 	cost_per_call: { first_call_cache_write: number; subsequent_cache_read: number };
 	session_estimate: { with_cache: number; without_cache: number; savings_pct: number };
 	sources: { name: string; tokens: number }[];
@@ -50,7 +50,38 @@ function loadData(): DashboardData {
 	const stats = runSkillkitJson("stats") as StatsJson | null;
 	const health = runSkillkitJson("health") as HealthJson | null;
 	const burnArr = runSkillkitJson("burn") as BurnAgent[] | null;
-	const context = runSkillkitJson("context") as ContextJson | null;
+	let context = runSkillkitJson("context") as ContextJson | null;
+
+	// Injisering av Gemini-data
+	const geminiTax = getGeminiContextTax();
+	const geminiUsage = getGeminiSkillUsage();
+
+	if (!context) {
+		context = {
+			always_loaded: { total_tokens: 0, claude_md_tokens: 0, skill_metadata_tokens: 500, memory_tokens: 0, gemini_md_tokens: 0 },
+			cost_per_call: { first_call_cache_write: 0, subsequent_cache_read: 0 },
+			session_estimate: { with_cache: 0, without_cache: 0, savings_pct: 0 },
+			sources: []
+		};
+	}
+
+	context.always_loaded.memory_tokens = geminiTax.memory || 0;
+	context.always_loaded.gemini_md_tokens = geminiTax.geminiMd || 0;
+	context.always_loaded.claude_md_tokens = geminiTax.claudeMd || context.always_loaded.claude_md_tokens || 0;
+	context.always_loaded.total_tokens = 
+		context.always_loaded.claude_md_tokens + 
+		context.always_loaded.gemini_md_tokens + 
+		context.always_loaded.memory_tokens + 
+		context.always_loaded.skill_metadata_tokens || 500;
+
+	if (stats && stats.top_skills) {
+		geminiUsage.forEach((count, name) => {
+			const existing = stats.top_skills.find(s => s.name === name);
+			if (existing) existing.total += count;
+			else stats.top_skills.push({ name, total: count, daily: [] });
+		});
+		stats.top_skills.sort((a, b) => b.total - a.total);
+	}
 
 	return {
 		stats,
@@ -356,8 +387,9 @@ export class DashboardPanel {
 		const total = ctx.always_loaded.total_tokens;
 		const segments = [
 			{ label: "CLAUDE.md", tokens: ctx.always_loaded.claude_md_tokens, cls: "as-ctx-claude" },
-			{ label: "Skills metadata", tokens: ctx.always_loaded.skill_metadata_tokens, cls: "as-ctx-skills" },
+			{ label: "GEMINI.md", tokens: ctx.always_loaded.gemini_md_tokens, cls: "as-ctx-claude" },
 			{ label: "Memory", tokens: ctx.always_loaded.memory_tokens, cls: "as-ctx-memory" },
+			{ label: "Skills metadata", tokens: ctx.always_loaded.skill_metadata_tokens, cls: "as-ctx-skills" },
 		];
 
 		const bar = section.createDiv("as-ctx-bar");

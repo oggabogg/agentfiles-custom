@@ -244,3 +244,55 @@ export function formatLastUsed(lastUsed: string | null): string {
 	if (days < 30) return `${days}d ago`;
 	return `${Math.floor(days / 30)}mo ago`;
 }
+
+
+
+export interface GeminiContextTax {
+	claudeMd: number;
+	geminiMd: number;
+	memory: number;
+	skillsMetadata: number;
+}
+
+export function getGeminiContextTax(): GeminiContextTax {
+	const fs = require('fs');
+	const getTokens = (p: string) => fs.existsSync(p) ? Math.ceil(fs.statSync(p).size / 4) : 0;
+
+	return {
+		claudeMd: getTokens("/Users/fredrikskauen/Documents/MDVault/CLAUDE.md"),
+		geminiMd: getTokens("/Users/fredrikskauen/Documents/MDVault/GEMINI.md"),
+		memory: getTokens("/Users/fredrikskauen/.gemini/GEMINI.md"),
+		skillsMetadata: 500
+	};
+}
+
+export function getGeminiSkillUsage(): Map<string, number> {
+	const skillMap = new Map<string, number>();
+	const fs = require('fs');
+	const path = require('path');
+	const home = require('os').homedir();
+	const chatsDir = path.join(home, ".gemini", "tmp", "fredrikskauen", "chats");
+
+	if (fs.existsSync(chatsDir)) {
+		const files = fs.readdirSync(chatsDir).filter((f: string) => f.endsWith(".json"));
+		for (const file of files) {
+			try {
+				const chat = JSON.parse(fs.readFileSync(path.join(chatsDir, file), "utf-8"));
+				if (chat && chat.messages) {
+					chat.messages.forEach((msg: any) => {
+						if (msg.toolCalls) {
+							msg.toolCalls.forEach((tc: any) => {
+								if (tc.name === "activate_skill" && tc.args && tc.args.name) {
+									const name = tc.args.name;
+									skillMap.set(name, (skillMap.get(name) || 0) + 1);
+								}
+							});
+						}
+					});
+				}
+			} catch (e) {}
+		}
+	}
+	return skillMap;
+}
+
