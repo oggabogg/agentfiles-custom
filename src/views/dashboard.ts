@@ -42,13 +42,19 @@ interface ContextJson {
 interface DashboardData {
 	stats: StatsJson | null;
 	health: HealthJson | null;
-	burn: BurnAgent | null;
+	burns: BurnAgent[];
 	context: ContextJson | null;
 }
 
 function enrichDataWithGemini(data: DashboardData): void {
 	const geminiTax = getGeminiContextTax();
 	const geminiUsage = getGeminiSkillUsage();
+	const geminiBurn = getGeminiBurn();
+
+	// Legg til Gemini i burns hvis den ikke er der allerede
+	if (!data.burns.find(b => b.agent === "Gemini CLI")) {
+		data.burns.push(geminiBurn);
+	}
 
 	if (data.context) {
 		data.context.always_loaded.memory_tokens = geminiTax.memory || 0;
@@ -117,7 +123,7 @@ function loadData(): DashboardData {
 	const data = {
 		stats,
 		health,
-		burn: burnArr && burnArr.length > 0 ? burnArr[0] : null,
+		burns: burnArr || [],
 		context,
 	};
 
@@ -223,7 +229,11 @@ export class DashboardPanel {
 			if (data.health) this.renderHealth(data.health, row);
 			if (data.context) this.renderContext(data.context, row);
 		}
-		if (data.burn) this.renderBurn(data.burn);
+		
+		for (const burn of data.burns) {
+			this.renderBurn(burn);
+		}
+
 		if (data.health) this.renderStale(data.health);
 	}
 
@@ -405,10 +415,17 @@ export class DashboardPanel {
 		section.createDiv({ cls: "as-dash-title", text: `Burn Rate — ${burn.agent} (${burn.period.days}d)` });
 
 		const stats = section.createDiv("as-dash-stats as-dash-stats-sm");
-		this.statCard(stats, `$${Math.round(burn.cost.total).toLocaleString()}`, "total cost", "flame");
-		this.statCard(stats, `$${Math.round(burn.cost.total / (burn.period.days || 1)).toLocaleString()}`, "daily avg", "trending-up");
+		const totalCost = burn.cost.total < 1 && burn.cost.total > 0 ? burn.cost.total.toFixed(2) : Math.round(burn.cost.total).toLocaleString();
+		const dailyAvg = (burn.cost.total / (burn.period.days || 1));
+		const dailyAvgStr = dailyAvg < 1 && dailyAvg > 0 ? dailyAvg.toFixed(2) : Math.round(dailyAvg).toLocaleString();
+
+		this.statCard(stats, `$${totalCost}`, "total cost", "flame");
+		this.statCard(stats, `$${dailyAvgStr}`, "daily avg", "trending-up");
 		this.statCard(stats, `${(burn.period.sessions || 0).toLocaleString()}`, "sessions", "terminal");
-		this.statCard(stats, `${((burn.period.api_calls || 0) / 1000).toFixed(0)}k`, "API calls", "zap");
+		
+		const apiCalls = burn.period.api_calls;
+		const apiCallsStr = apiCalls >= 1000 ? `${(apiCalls / 1000).toFixed(1)}k` : String(apiCalls);
+		this.statCard(stats, apiCallsStr, "API calls", "zap");
 
 		if (burn.by_model && burn.by_model.length > 0) {
 			const models = section.createDiv("as-model-breakdown");
@@ -417,7 +434,8 @@ export class DashboardPanel {
 				row.createSpan({ cls: "as-model-name", text: m.model });
 				row.createSpan({ cls: "as-model-calls", text: `${m.apiCalls.toLocaleString()} calls` });
 				if (m.costUsd > 0) {
-					row.createSpan({ cls: "as-model-cost", text: `$${Math.round(m.costUsd).toLocaleString()}` });
+					const mCost = m.costUsd < 1 ? m.costUsd.toFixed(2) : Math.round(m.costUsd).toLocaleString();
+					row.createSpan({ cls: "as-model-cost", text: `$${mCost}` });
 				}
 			}
 		}

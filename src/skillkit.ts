@@ -247,11 +247,90 @@ export function formatLastUsed(lastUsed: string | null): string {
 
 
 
-export interface GeminiContextTax {
-	claudeMd: number;
-	geminiMd: number;
-	memory: number;
-	skillsMetadata: number;
+export interface GeminiBurn {
+	agent: string;
+	cost: { total: number };
+	period: { days: number; sessions: number; api_calls: number };
+	tokens: { input: number; output: number; cache_creation: number; cache_read: number };
+	by_day: { date: string; costUsd: number; apiCalls: number }[];
+	by_model: { model: string; apiCalls: number; costUsd: number }[];
+}
+
+export function getGeminiBurn(): GeminiBurn {
+	const fs = require("fs");
+	const path = require("path");
+	const home = require("os").homedir();
+	const chatsDir = path.join(home, ".gemini", "tmp", "fredrikskauen", "chats");
+
+	const burn: GeminiBurn = {
+		agent: "Gemini CLI",
+		cost: { total: 0 },
+		period: { days: 30, sessions: 0, api_calls: 0 },
+		tokens: { input: 0, output: 0, cache_creation: 0, cache_read: 0 },
+		by_day: [],
+		by_model: [],
+	};
+
+	if (!fs.existsSync(chatsDir)) return burn;
+
+	const files = fs.readdirSync(chatsDir).filter((f: string) => f.endsWith(".json"));
+	const now = Date.now();
+	const thirtyDaysAgo = now - 30 * 24 * 60 * 60 * 1000;
+
+	const dayMap = new Map<string, { cost: number; calls: number }>();
+	const modelMap = new Map<string, { cost: number; calls: number }>();
+
+	for (const file of files) {
+		try {
+			const filePath = path.join(chatsDir, file);
+			const stats = fs.statSync(filePath);
+			if (stats.mtimeMs < thirtyDaysAgo) continue;
+
+			const chat = JSON.parse(fs.readFileSync(filePath, "utf-8"));
+			burn.period.sessions++;
+
+			if (chat && chat.messages) {
+				chat.messages.forEach((msg: any) => {
+					if (msg.role === "model" && msg.tokens) {
+						burn.period.api_calls++;
+						const t = msg.tokens;
+						burn.tokens.input += t.input || 0;
+						burn.tokens.output += t.output || 0;
+						burn.tokens.cache_creation += t.cached || 0; // Gemini kaller det ofte bare cached
+						burn.tokens.cache_read += 0; // Gemini CLI har ikke separat cache_read i loggene ennå
+
+						// Estimer kostnad (veldig grovt for Gemini 1.5 Pro/Flash)
+						// 1.5 Pro: $1.25 / 1M input, $3.75 / 1M output (over 128k)
+						// Vi bruker en forenklet snittpris for nå: $1 / 1M tokens
+						const model = msg.model || "gemini-1.5-pro";
+						const cost = ((t.input || 0) + (t.output || 0) + (t.cached || 0)) * 0.000002; // $2 pr million tokens som snitt
+						burn.cost.total += cost;
+
+						const date = stats.mtime.toISOString().split("T")[0];
+						const day = dayMap.get(date) || { cost: 0, calls: 0 };
+						day.cost += cost;
+						day.calls++;
+						dayMap.set(date, day);
+
+						const mod = modelMap.get(model) || { cost: 0, calls: 0 };
+						mod.cost += cost;
+						mod.calls++;
+						modelMap.set(model, mod);
+					}
+				});
+			}
+		} catch (e) {}
+	}
+
+	burn.by_day = Array.from(dayMap.entries())
+		.map(([date, data]) => ({ date, costUsd: data.cost, apiCalls: data.calls }))
+		.sort((a, b) => a.date.localeCompare(b.date));
+
+	burn.by_model = Array.from(modelMap.entries())
+		.map(([model, data]) => ({ model, costUsd: data.cost, apiCalls: data.calls }))
+		.sort((a, b) => b.costUsd - a.costUsd);
+
+	return burn;
 }
 
 export function getGeminiContextTax(): GeminiContextTax {
