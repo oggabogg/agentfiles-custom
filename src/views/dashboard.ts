@@ -86,6 +86,23 @@ function loadData(): DashboardData {
 		stats.top_skills.sort((a, b) => b.total - a.total);
 	}
 
+	if (health) {
+		// Rens never_used for kjerne-verktøy (hvis skillkit har plukket dem opp)
+		health.usage.never_used = health.usage.never_used.filter(name => !DashboardPanel.CORE_TOOLS.has(name));
+
+		geminiUsage.forEach((count, name) => {
+			if (count > 0 && !DashboardPanel.CORE_TOOLS.has(name)) {
+				const idx = health.usage.never_used.indexOf(name);
+				if (idx !== -1) {
+					health.usage.never_used.splice(idx, 1);
+					health.usage.used_30d++;
+				}
+			}
+		});
+		// Oppdater unused_30d (som er de som aldri er trigget)
+		health.usage.unused_30d = health.usage.never_used.length;
+	}
+
 	return {
 		stats,
 		health,
