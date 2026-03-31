@@ -46,15 +46,59 @@ interface DashboardData {
 	context: ContextJson | null;
 }
 
+function enrichDataWithGemini(data: DashboardData): void {
+	const geminiTax = getGeminiContextTax();
+	const geminiUsage = getGeminiSkillUsage();
+
+	if (data.context) {
+		data.context.always_loaded.memory_tokens = geminiTax.memory || 0;
+		data.context.always_loaded.gemini_md_tokens = geminiTax.geminiMd || 0;
+		data.context.always_loaded.claude_md_tokens = geminiTax.claudeMd || data.context.always_loaded.claude_md_tokens || 0;
+		data.context.always_loaded.total_tokens = 
+			data.context.always_loaded.claude_md_tokens + 
+			data.context.always_loaded.gemini_md_tokens + 
+			data.context.always_loaded.memory_tokens + 
+			data.context.always_loaded.skill_metadata_tokens || 500;
+	}
+
+	if (data.stats && data.stats.top_skills) {
+		// Filter ut kjerne-verktøy fra skillkit-data
+		data.stats.top_skills = data.stats.top_skills.filter(s => !DashboardPanel.CORE_TOOLS.has(s.name));
+
+		geminiUsage.forEach((count, name) => {
+			const existing = data.stats.top_skills.find(s => s.name === name);
+			if (existing) existing.total += count;
+			else if (!DashboardPanel.CORE_TOOLS.has(name)) {
+				data.stats!.top_skills.push({ name, total: count, daily: [] });
+			}
+		});
+		data.stats.top_skills.sort((a, b) => b.total - a.total);
+	}
+
+	if (data.health) {
+		// Rens never_used for kjerne-verktøy (hvis skillkit har plukket dem opp)
+		data.health.usage.never_used = data.health.usage.never_used.filter(name => !DashboardPanel.CORE_TOOLS.has(name));
+
+		// Finn unike brukte skills fra Gemini som ikke er kjerne-verktøy
+		geminiUsage.forEach((count, name) => {
+			if (count > 0 && !DashboardPanel.CORE_TOOLS.has(name)) {
+				const idx = data.health!.usage.never_used.indexOf(name);
+				if (idx !== -1) {
+					data.health!.usage.never_used.splice(idx, 1);
+					data.health!.usage.used_30d++;
+				}
+			}
+		});
+		// Oppdater unused_30d (som er de som aldri er trigget)
+		data.health.usage.unused_30d = data.health.usage.never_used.length;
+	}
+}
+
 function loadData(): DashboardData {
 	const stats = runSkillkitJson("stats") as StatsJson | null;
 	const health = runSkillkitJson("health") as HealthJson | null;
 	const burnArr = runSkillkitJson("burn") as BurnAgent[] | null;
 	let context = runSkillkitJson("context") as ContextJson | null;
-
-	// Injisering av Gemini-data
-	const geminiTax = getGeminiContextTax();
-	const geminiUsage = getGeminiSkillUsage();
 
 	if (!context) {
 		context = {
@@ -65,50 +109,15 @@ function loadData(): DashboardData {
 		};
 	}
 
-	context.always_loaded.memory_tokens = geminiTax.memory || 0;
-	context.always_loaded.gemini_md_tokens = geminiTax.geminiMd || 0;
-	context.always_loaded.claude_md_tokens = geminiTax.claudeMd || context.always_loaded.claude_md_tokens || 0;
-	context.always_loaded.total_tokens = 
-		context.always_loaded.claude_md_tokens + 
-		context.always_loaded.gemini_md_tokens + 
-		context.always_loaded.memory_tokens + 
-		context.always_loaded.skill_metadata_tokens || 500;
-
-	if (stats && stats.top_skills) {
-		// Filter ut kjerne-verktøy fra skillkit-data
-		stats.top_skills = stats.top_skills.filter(s => !DashboardPanel.CORE_TOOLS.has(s.name));
-
-		geminiUsage.forEach((count, name) => {
-			const existing = stats.top_skills.find(s => s.name === name);
-			if (existing) existing.total += count;
-			else stats.top_skills.push({ name, total: count, daily: [] });
-		});
-		stats.top_skills.sort((a, b) => b.total - a.total);
-	}
-
-	if (health) {
-		// Rens never_used for kjerne-verktøy (hvis skillkit har plukket dem opp)
-		health.usage.never_used = health.usage.never_used.filter(name => !DashboardPanel.CORE_TOOLS.has(name));
-
-		geminiUsage.forEach((count, name) => {
-			if (count > 0 && !DashboardPanel.CORE_TOOLS.has(name)) {
-				const idx = health.usage.never_used.indexOf(name);
-				if (idx !== -1) {
-					health.usage.never_used.splice(idx, 1);
-					health.usage.used_30d++;
-				}
-			}
-		});
-		// Oppdater unused_30d (som er de som aldri er trigget)
-		health.usage.unused_30d = health.usage.never_used.length;
-	}
-
-	return {
+	const data = {
 		stats,
 		health,
 		burn: burnArr && burnArr.length > 0 ? burnArr[0] : null,
 		context,
 	};
+
+	enrichDataWithGemini(data);
+	return data;
 }
 
 import { existsSync, readFileSync, writeFileSync } from "fs";
@@ -158,10 +167,7 @@ export class DashboardPanel {
 		}
 
 		if (cachedData) {
-			// Sørg for at cached data også blir filtrert
-			if (cachedData.stats && cachedData.stats.top_skills) {
-				cachedData.stats.top_skills = cachedData.stats.top_skills.filter(s => !DashboardPanel.CORE_TOOLS.has(s.name));
-			}
+			enrichDataWithGemini(cachedData);
 			this.renderDashboard(cachedData);
 		} else {
 			const loading = this.containerEl.createDiv("as-dash-loading");
