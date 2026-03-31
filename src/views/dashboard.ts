@@ -177,23 +177,43 @@ export class DashboardPanel {
 			return;
 		}
 
-		if (cachedData) {
-			enrichDataWithGemini(cachedData);
-			this.renderDashboard(cachedData);
-		} else {
-			const loading = this.containerEl.createDiv("as-dash-loading");
-			loading.createDiv("as-dash-spinner");
-			loading.createDiv({ cls: "as-dash-loading-text", text: "Loading analytics..." });
+		try {
+			if (cachedData) {
+				enrichDataWithGemini(cachedData);
+				this.renderDashboard(cachedData);
+			} else {
+				const loading = this.containerEl.createDiv("as-dash-loading");
+				loading.createDiv("as-dash-spinner");
+				loading.createDiv({ cls: "as-dash-loading-text", text: "Loading analytics..." });
 
-			setTimeout(() => {
-				const data = loadData();
-				cachedData = data;
-				cachedAt = Date.now();
-				saveDiskCache();
-				loading.remove();
-				this.renderDashboard(data);
-			}, 10);
+				setTimeout(() => {
+					try {
+						const data = loadData();
+						cachedData = data;
+						cachedAt = Date.now();
+						saveDiskCache();
+						loading.remove();
+						this.renderDashboard(data);
+					} catch (e) {
+						loading.remove();
+						this.renderError(e);
+					}
+				}, 10);
+			}
+		} catch (e) {
+			this.renderError(e);
 		}
+	}
+
+	private renderError(e: any): void {
+		const error = this.containerEl.createDiv("as-dash-error");
+		error.createEl("h3", { text: "Error loading dashboard" });
+		error.createEl("pre", { text: String(e.stack || e) });
+		const btn = error.createEl("button", { text: "Retry" });
+		btn.addEventListener("click", () => {
+			cachedData = null;
+			this.render();
+		});
 	}
 
 	public static CORE_TOOLS = new Set([
