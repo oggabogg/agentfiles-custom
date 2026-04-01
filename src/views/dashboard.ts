@@ -73,7 +73,14 @@ function enrichDataWithGemini(data: DashboardData): void {
 		
 		data.context.always_loaded.memory_tokens = geminiTax.memory || 0;
 		data.context.always_loaded.gemini_md_tokens = geminiTax.geminiMd || 0;
-		data.context.always_loaded.claude_md_tokens = geminiTax.claudeMd || data.context.always_loaded.claude_md_tokens || 0;
+		// Prefer direct file-read (geminiTax.claudeMd), fall back to skillkit's own
+		// claude_md_tokens calculation (which scans all loaded CLAUDE.md sources).
+		// Never overwrite with 0 if skillkit already has a real value.
+		if (geminiTax.claudeMd > 0) {
+			data.context.always_loaded.claude_md_tokens = geminiTax.claudeMd;
+		} else if (!data.context.always_loaded.claude_md_tokens) {
+			data.context.always_loaded.claude_md_tokens = 0;
+		}
 		
 		// Vi legger til tokens brukt i denne perioden for å vise "tax" mer dynamisk hvis ønskelig, 
 		// men for nå holder vi oss til de "always loaded" tokens som før.
@@ -518,18 +525,20 @@ export class DashboardPanel {
 			{ label: "Skills metadata", tokens: ctx.always_loaded.skill_metadata_tokens, cls: "as-ctx-skills" },
 		];
 
+		const fmtTokens = (t: number) => t >= 100 ? `${(t / 1000).toFixed(1)}k` : `${t}`;
+
 		const bar = section.createDiv("as-ctx-bar");
 		for (const seg of segments) {
 			const part = bar.createDiv(`as-ctx-part ${seg.cls}`);
 			part.setCssProps({ "--bar-w": `${(seg.tokens / total) * 100}%` });
-			part.title = `${seg.label}: ${(seg.tokens / 1000).toFixed(1)}k tokens`;
+			part.title = `${seg.label}: ${fmtTokens(seg.tokens)} tokens`;
 		}
 
 		const legend = section.createDiv("as-ctx-legend");
 		for (const seg of segments) {
 			const item = legend.createDiv("as-ctx-legend-item");
 			item.createSpan({ cls: `as-ctx-dot ${seg.cls}` });
-			item.createSpan({ text: `${seg.label}: ${(seg.tokens / 1000).toFixed(1)}k` });
+			item.createSpan({ text: `${seg.label}: ${fmtTokens(seg.tokens)}` });
 		}
 
 		const costs = section.createDiv("as-ctx-costs");

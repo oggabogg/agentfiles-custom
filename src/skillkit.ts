@@ -335,12 +335,25 @@ export function getGeminiBurn(): GeminiBurn {
 
 export function getGeminiContextTax(): GeminiContextTax {
 	const fs = require('fs');
+	const path = require('path');
+	const home = require('os').homedir();
 	const getTokens = (p: string) => fs.existsSync(p) ? Math.ceil(fs.statSync(p).size / 4) : 0;
 
+	// Scan for CLAUDE.md files across global and project directories
+	const SKIP_DIRS = new Set(["node_modules", ".Trash", "Library", "Applications", "Music", "Movies", "Pictures", "Public"]);
+	let claudeMdTokens = getTokens(path.join(home, ".claude", "CLAUDE.md"));
+	try {
+		for (const entry of fs.readdirSync(home, { withFileTypes: true })) {
+			if ((!entry.isDirectory() && !entry.isSymbolicLink()) || SKIP_DIRS.has(entry.name)) continue;
+			const claudeMd = path.join(home, entry.name, "CLAUDE.md");
+			claudeMdTokens += getTokens(claudeMd);
+		}
+	} catch { /* permission errors */ }
+
 	return {
-		claudeMd: getTokens("/Users/fredrikskauen/Documents/MDVault/CLAUDE.md"),
-		geminiMd: getTokens("/Users/fredrikskauen/Documents/MDVault/GEMINI.md"),
-		memory: getTokens("/Users/fredrikskauen/.gemini-app/.gemini/GEMINI.md"),
+		claudeMd: claudeMdTokens,
+		geminiMd: getTokens(path.join(home, "Documents", "MDVault", "GEMINI.md")),
+		memory: getTokens(path.join(home, ".gemini-app", ".gemini", "GEMINI.md")),
 		skillsMetadata: 500
 	};
 }
