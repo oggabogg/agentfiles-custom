@@ -260,7 +260,7 @@ export function getGeminiBurn(): GeminiBurn {
 	const fs = require("fs");
 	const path = require("path");
 	const home = require("os").homedir();
-	const chatsDir = path.join(home, ".gemini-app/.gemini", "tmp", "fredrikskauen", "chats");
+	const chatsDir = path.join(home, ".gemini-app", "tmp", "fredrikskauen", "chats");
 
 	const burn: GeminiBurn = {
 		agent: "Gemini CLI",
@@ -394,7 +394,7 @@ export function getGeminiSkillUsage(): Map<string, number> {
 	const fs = require('fs');
 	const path = require('path');
 	const home = require('os').homedir();
-	const chatsDir = path.join(home, ".gemini-app/.gemini", "tmp", "fredrikskauen", "chats");
+	const chatsDir = path.join(home, ".gemini-app", "tmp", "fredrikskauen", "chats");
 
 	if (fs.existsSync(chatsDir)) {
 		const files = fs.readdirSync(chatsDir).filter((f: string) => f.endsWith(".json"));
