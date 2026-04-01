@@ -49,7 +49,13 @@ interface DashboardData {
 function enrichDataWithGemini(data: DashboardData): void {
 	const geminiTax = skillkit.getGeminiContextTax();
 	const geminiUsage = skillkit.getGeminiSkillUsage();
+	const claudeUsage = skillkit.getClaudeCodeSkillUsage();
 	const geminiBurn = skillkit.getGeminiBurn();
+
+	// Merge Claude Code skill usage into geminiUsage so downstream logic handles both
+	claudeUsage.forEach((count, name) => {
+		geminiUsage.set(name, (geminiUsage.get(name) || 0) + count);
+	});
 
 	// Migrer fra singular 'burn' til 'burns' array for gammel cache-kompatibilitet
 	if (!data.burns) {

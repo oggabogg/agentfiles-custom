@@ -260,7 +260,7 @@ export function getGeminiBurn(): GeminiBurn {
 	const fs = require("fs");
 	const path = require("path");
 	const home = require("os").homedir();
-	const chatsDir = path.join(home, ".gemini", "tmp", "fredrikskauen", "chats");
+	const chatsDir = path.join(home, ".gemini-app/.gemini", "tmp", "fredrikskauen", "chats");
 
 	const burn: GeminiBurn = {
 		agent: "Gemini CLI",
@@ -340,9 +340,53 @@ export function getGeminiContextTax(): GeminiContextTax {
 	return {
 		claudeMd: getTokens("/Users/fredrikskauen/Documents/MDVault/CLAUDE.md"),
 		geminiMd: getTokens("/Users/fredrikskauen/Documents/MDVault/GEMINI.md"),
-		memory: getTokens("/Users/fredrikskauen/.gemini/GEMINI.md"),
+		memory: getTokens("/Users/fredrikskauen/.gemini-app/.gemini/GEMINI.md"),
 		skillsMetadata: 500
 	};
+}
+
+export function getClaudeCodeSkillUsage(): Map<string, number> {
+	const skillMap = new Map<string, number>();
+	const fs = require('fs');
+	const path = require('path');
+	const home = require('os').homedir();
+	const projectsDir = path.join(home, ".claude", "projects");
+
+	if (!fs.existsSync(projectsDir)) return skillMap;
+
+	const now = Date.now();
+	const thirtyDaysAgo = now - 30 * 24 * 60 * 60 * 1000;
+
+	try {
+		for (const project of fs.readdirSync(projectsDir)) {
+			const projectPath = path.join(projectsDir, project);
+			if (!fs.statSync(projectPath).isDirectory()) continue;
+			for (const file of fs.readdirSync(projectPath).filter((f: string) => f.endsWith(".jsonl"))) {
+				const filePath = path.join(projectPath, file);
+				try {
+					const lines = fs.readFileSync(filePath, "utf-8").split("\n");
+					for (const line of lines) {
+						if (!line.trim()) continue;
+						try {
+							const msg = JSON.parse(line);
+							const timestamp = msg.timestamp;
+							if (timestamp && new Date(timestamp).getTime() < thirtyDaysAgo) continue;
+							const content = msg?.message?.content;
+							if (!Array.isArray(content)) continue;
+							for (const block of content) {
+								if (block?.type === "tool_use" && block?.name === "Skill" && block?.input?.skill) {
+									const name = block.input.skill;
+									skillMap.set(name, (skillMap.get(name) || 0) + 1);
+								}
+							}
+						} catch { /* skip malformed lines */ }
+					}
+				} catch { /* skip unreadable files */ }
+			}
+		}
+	} catch { /* skip permission errors */ }
+
+	return skillMap;
 }
 
 export function getGeminiSkillUsage(): Map<string, number> {
@@ -350,7 +394,7 @@ export function getGeminiSkillUsage(): Map<string, number> {
 	const fs = require('fs');
 	const path = require('path');
 	const home = require('os').homedir();
-	const chatsDir = path.join(home, ".gemini", "tmp", "fredrikskauen", "chats");
+	const chatsDir = path.join(home, ".gemini-app/.gemini", "tmp", "fredrikskauen", "chats");
 
 	if (fs.existsSync(chatsDir)) {
 		const files = fs.readdirSync(chatsDir).filter((f: string) => f.endsWith(".json"));
