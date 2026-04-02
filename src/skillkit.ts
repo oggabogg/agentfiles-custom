@@ -627,3 +627,92 @@ export function getSkillKeywordCoverage(): Map<string, KeywordCoverage> {
 
 	return result;
 }
+
+export interface SkillUpdateInfo {
+	name: string;
+	updatedAt: Date;
+}
+
+export function getRecentlyUpdatedSkills(days = 30): SkillUpdateInfo[] {
+	const fs = require("fs");
+	const path = require("path");
+	const home = require("os").homedir();
+	const skillsDir = path.join(home, ".claude", "skills");
+	const cutoff = Date.now() - days * 24 * 60 * 60 * 1000;
+	const result: SkillUpdateInfo[] = [];
+
+	if (!fs.existsSync(skillsDir)) return result;
+
+	for (const skillName of fs.readdirSync(skillsDir)) {
+		const skillMdPath = path.join(skillsDir, skillName, "SKILL.md");
+		if (!fs.existsSync(skillMdPath)) continue;
+		try {
+			const mtime = fs.statSync(skillMdPath).mtime as Date;
+			if (mtime.getTime() >= cutoff) {
+				result.push({ name: skillName, updatedAt: mtime });
+			}
+		} catch { /* skip */ }
+	}
+
+	return result.sort((a, b) => b.updatedAt.getTime() - a.updatedAt.getTime());
+}
+
+const UPDATE_LOG_FILE = join(homedir(), ".skillkit", "skill-update-log.json");
+
+export function snapshotSkillMtimes(): Map<string, number> {
+	const fs = require("fs");
+	const path = require("path");
+	const skillsDir = path.join(homedir(), ".claude", "skills");
+	const snap = new Map<string, number>();
+	if (!fs.existsSync(skillsDir)) return snap;
+	for (const skillName of fs.readdirSync(skillsDir)) {
+		const p = path.join(skillsDir, skillName, "SKILL.md");
+		if (fs.existsSync(p)) snap.set(skillName, fs.statSync(p).mtimeMs);
+	}
+	return snap;
+}
+
+export function logSkillUpdates(before: Map<string, number>): void {
+	const fs = require("fs");
+	const path = require("path");
+	const skillsDir = path.join(homedir(), ".claude", "skills");
+	if (!fs.existsSync(skillsDir)) return;
+
+	const updated: string[] = [];
+	for (const skillName of fs.readdirSync(skillsDir)) {
+		const p = path.join(skillsDir, skillName, "SKILL.md");
+		if (!fs.existsSync(p)) continue;
+		const newMtime = fs.statSync(p).mtimeMs;
+		const oldMtime = before.get(skillName);
+		if (oldMtime === undefined || newMtime > oldMtime) updated.push(skillName);
+	}
+	if (updated.length === 0) return;
+
+	let log: { date: string; skills: string[] }[] = [];
+	try { log = JSON.parse(fs.readFileSync(UPDATE_LOG_FILE, "utf-8")); } catch { /* empty */ }
+	const today = new Date().toISOString().split("T")[0];
+	const existing = log.find(e => e.date === today);
+	if (existing) {
+		existing.skills = [...new Set([...existing.skills, ...updated])];
+	} else {
+		log.push({ date: today, skills: updated });
+	}
+	// Keep last 90 days
+	const cutoff = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000).toISOString().split("T")[0];
+	log = log.filter(e => e.date >= cutoff);
+	try { fs.writeFileSync(UPDATE_LOG_FILE, JSON.stringify(log, null, 2), "utf-8"); } catch { /* empty */ }
+}
+
+export interface UpdateLogEntry {
+	date: string;
+	skills: string[];
+}
+
+export function getSkillUpdateLog(days = 30): UpdateLogEntry[] {
+	const fs = require("fs");
+	const cutoff = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString().split("T")[0];
+	try {
+		const log: UpdateLogEntry[] = JSON.parse(fs.readFileSync(UPDATE_LOG_FILE, "utf-8"));
+		return log.filter(e => e.date >= cutoff).sort((a, b) => b.date.localeCompare(a.date));
+	} catch { return []; }
+}

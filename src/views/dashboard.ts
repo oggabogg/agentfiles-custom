@@ -291,6 +291,7 @@ export class DashboardPanel {
 		this.renderActivationModes();
 		this.renderKeywordCoverage();
 		if (data.health) this.renderStale(data.health);
+		this.renderRecentlyUpdated();
 	}
 
 	private renderActionBar(data: DashboardData): void {
@@ -308,8 +309,10 @@ export class DashboardPanel {
 		updateBtn.addEventListener("click", () => {
 			updateBtn.setText("Updating...");
 			updateBtn.disabled = true;
+			const before = skillkit.snapshotSkillMtimes();
 			void updateAllSkillsAsync().then((result) => {
 				if (result.success) {
+					skillkit.logSkillUpdates(before);
 					const msg = result.count > 0 ? `Updated ${result.count} skill(s)` : "All skills up to date";
 					new Notice(msg, 5000);
 					cachedData = null;
@@ -594,6 +597,23 @@ export class DashboardPanel {
 			}
 			for (const kw of cov.missKeywords) {
 				chips.createSpan({ cls: "as-kc-chip as-kc-miss", text: kw });
+			}
+		}
+	}
+
+	private renderRecentlyUpdated(): void {
+		const log = skillkit.getSkillUpdateLog(30);
+		if (log.length === 0) return;
+
+		const section = this.containerEl.createDiv("as-dash-section");
+		section.createDiv({ cls: "as-dash-title", text: "Recently Updated (30d)" });
+
+		const list = section.createDiv("as-ru-list");
+		for (const entry of log) {
+			list.createDiv({ cls: "as-ru-date", text: entry.date });
+			const chips = list.createDiv("as-ru-chips");
+			for (const name of entry.skills) {
+				chips.createSpan({ cls: "as-ru-item", text: name });
 			}
 		}
 	}

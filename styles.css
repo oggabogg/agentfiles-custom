@@ -1993,3 +1993,39 @@
 	border-color: var(--background-modifier-border);
 	color: var(--text-faint);
 }
+
+/* Recently Updated section */
+.as-ru-list {
+	display: flex;
+	flex-direction: column;
+	gap: 2px;
+}
+
+.as-ru-date {
+	font-size: var(--font-ui-smaller);
+	color: var(--text-faint);
+	margin-top: 8px;
+	margin-bottom: 2px;
+}
+
+.as-ru-date:first-child {
+	margin-top: 0;
+}
+
+.as-ru-item {
+	font-size: var(--font-ui-smaller);
+	color: var(--text-muted);
+	padding: 2px 8px;
+	background: var(--background-secondary);
+	border: 1px solid var(--background-modifier-border);
+	border-radius: var(--radius-s);
+	display: inline-flex;
+	align-self: flex-start;
+}
+
+.as-ru-chips {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 4px;
+	margin-bottom: 6px;
+}
