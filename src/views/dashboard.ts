@@ -602,11 +602,16 @@ export class DashboardPanel {
 	}
 
 	private renderRecentlyUpdated(): void {
+		skillkit.checkAndLogSkillChanges();
 		const log = skillkit.getSkillUpdateLog(30);
-		if (log.length === 0) return;
 
 		const section = this.containerEl.createDiv("as-dash-section");
 		section.createDiv({ cls: "as-dash-title", text: "Recently Updated (30d)" });
+
+		if (log.length === 0) {
+			section.createDiv({ cls: "as-stale-hint", text: "No updates tracked yet — click \"Update skills\" to start logging." });
+			return;
+		}
 
 		const list = section.createDiv("as-ru-list");
 		for (const entry of log) {

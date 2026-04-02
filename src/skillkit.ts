@@ -716,3 +716,49 @@ export function getSkillUpdateLog(days = 30): UpdateLogEntry[] {
 		return log.filter(e => e.date >= cutoff).sort((a, b) => b.date.localeCompare(a.date));
 	} catch { return []; }
 }
+
+const MTIME_SNAPSHOT_FILE = join(homedir(), ".skillkit", "skill-mtime-snapshot.json");
+
+export function checkAndLogSkillChanges(): void {
+	const fs = require("fs");
+	const path = require("path");
+	const skillsDir = path.join(homedir(), ".claude", "skills");
+	if (!fs.existsSync(skillsDir)) return;
+
+	// Load previous snapshot
+	let prev: Record<string, number> = {};
+	try { prev = JSON.parse(fs.readFileSync(MTIME_SNAPSHOT_FILE, "utf-8")); } catch { /* first run */ }
+
+	// Read current mtimes
+	const current: Record<string, number> = {};
+	for (const skillName of fs.readdirSync(skillsDir)) {
+		const p = path.join(skillsDir, skillName, "SKILL.md");
+		if (fs.existsSync(p)) current[skillName] = fs.statSync(p).mtimeMs;
+	}
+
+	// Find changed or new skills (skip if no previous snapshot — first run, just save)
+	const hasPrev = Object.keys(prev).length > 0;
+	if (hasPrev) {
+		const changed = Object.entries(current)
+			.filter(([name, mtime]) => prev[name] === undefined || mtime > prev[name])
+			.map(([name]) => name);
+
+		if (changed.length > 0) {
+			let log: { date: string; skills: string[] }[] = [];
+			try { log = JSON.parse(fs.readFileSync(UPDATE_LOG_FILE, "utf-8")); } catch { /* empty */ }
+			const today = new Date().toISOString().split("T")[0];
+			const existing = log.find(e => e.date === today);
+			if (existing) {
+				existing.skills = [...new Set([...existing.skills, ...changed])];
+			} else {
+				log.push({ date: today, skills: changed });
+			}
+			const cutoff = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000).toISOString().split("T")[0];
+			log = log.filter(e => e.date >= cutoff);
+			try { fs.writeFileSync(UPDATE_LOG_FILE, JSON.stringify(log, null, 2), "utf-8"); } catch { /* empty */ }
+		}
+	}
+
+	// Save current snapshot
+	try { fs.writeFileSync(MTIME_SNAPSHOT_FILE, JSON.stringify(current, null, 2), "utf-8"); } catch { /* empty */ }
+}
