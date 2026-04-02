@@ -1864,3 +1864,132 @@
 .as-filter-clear:hover {
 	text-decoration: underline;
 }
+
+/* Trigger Quality section */
+.as-tq-hint {
+	font-size: var(--font-ui-smaller);
+	color: var(--text-faint);
+	margin-bottom: 10px;
+}
+
+.as-tq-list {
+	display: flex;
+	flex-direction: column;
+	gap: 6px;
+}
+
+.as-tq-row {
+	display: grid;
+	grid-template-columns: 140px 1fr 90px;
+	align-items: center;
+	gap: 10px;
+}
+
+.as-tq-name {
+	font-size: var(--font-ui-smaller);
+	color: var(--text-muted);
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
+}
+
+.as-tq-bar {
+	display: flex;
+	height: 8px;
+	border-radius: 4px;
+	overflow: hidden;
+	background: var(--background-modifier-border);
+}
+
+.as-tq-auto {
+	width: var(--bar-w);
+	background: var(--color-green);
+	border-radius: 0;
+	transition: width 0.3s ease;
+}
+
+.as-tq-manual {
+	width: var(--bar-w);
+	background: var(--color-orange, #e8a060);
+	border-radius: 0;
+	transition: width 0.3s ease;
+}
+
+.as-tq-label {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	justify-content: flex-end;
+}
+
+.as-tq-auto-pct {
+	font-size: var(--font-ui-smaller);
+	color: var(--text-normal);
+	font-weight: 500;
+}
+
+.as-tq-total {
+	font-size: var(--font-ui-smaller);
+	color: var(--text-faint);
+}
+
+/* Keyword Coverage section */
+.as-kc-list {
+	display: flex;
+	flex-direction: column;
+	gap: 10px;
+}
+
+.as-kc-row {
+	display: flex;
+	flex-direction: column;
+	gap: 4px;
+}
+
+.as-kc-header {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+}
+
+.as-kc-name {
+	font-size: var(--font-ui-smaller);
+	color: var(--text-muted);
+	font-weight: 500;
+}
+
+.as-kc-pct {
+	font-size: var(--font-ui-smaller);
+	font-weight: 600;
+	padding: 1px 6px;
+	border-radius: var(--radius-s);
+}
+
+.as-kc-pct-good { color: var(--color-green); }
+.as-kc-pct-mid  { color: var(--color-yellow); }
+.as-kc-pct-low  { color: var(--color-red); }
+
+.as-kc-chips {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 4px;
+}
+
+.as-kc-chip {
+	font-size: 10px;
+	padding: 1px 6px;
+	border-radius: var(--radius-s);
+	border: 1px solid transparent;
+}
+
+.as-kc-hit {
+	background: rgba(var(--color-green-rgb, 68,207,110), 0.12);
+	border-color: rgba(var(--color-green-rgb, 68,207,110), 0.3);
+	color: var(--color-green);
+}
+
+.as-kc-miss {
+	background: var(--background-secondary);
+	border-color: var(--background-modifier-border);
+	color: var(--text-faint);
+}

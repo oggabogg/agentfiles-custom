@@ -402,6 +402,78 @@ export function getClaudeCodeSkillUsage(): Map<string, number> {
 	return skillMap;
 }
 
+export interface ActivationModes {
+	manual: number;
+	auto: number;
+}
+
+function isManualActivation(userMsg: string, skillName: string): boolean {
+	const lower = userMsg.toLowerCase();
+	// Slash command (e.g. /commit)
+	if (/^\/\w/.test(userMsg.trim())) return true;
+	// Explicit skill name mention
+	if (lower.includes(skillName.toLowerCase())) return true;
+	// Common manual invocation phrases
+	const manualPhrases = ["activate", "load the", "invoke", "use skill", "load skill", "use the skill", "bruk skill", "aktiver"];
+	return manualPhrases.some(p => lower.includes(p));
+}
+
+export function getClaudeCodeActivationModes(): Map<string, ActivationModes> {
+	const modeMap = new Map<string, ActivationModes>();
+	const fs = require('fs');
+	const path = require('path');
+	const home = require('os').homedir();
+	const projectsDir = path.join(home, ".claude", "projects");
+
+	if (!fs.existsSync(projectsDir)) return modeMap;
+
+	const now = Date.now();
+	const thirtyDaysAgo = now - 30 * 24 * 60 * 60 * 1000;
+
+	try {
+		for (const project of fs.readdirSync(projectsDir)) {
+			const projectPath = path.join(projectsDir, project);
+			if (!fs.statSync(projectPath).isDirectory()) continue;
+			for (const file of fs.readdirSync(projectPath).filter((f: string) => f.endsWith(".jsonl"))) {
+				const filePath = path.join(projectPath, file);
+				try {
+					const lines = fs.readFileSync(filePath, "utf-8").split("\n");
+					let lastUserMsg = "";
+					for (const line of lines) {
+						if (!line.trim()) continue;
+						try {
+							const msg = JSON.parse(line);
+							const timestamp = msg.timestamp;
+							if (timestamp && new Date(timestamp).getTime() < thirtyDaysAgo) continue;
+							const role = msg?.message?.role;
+							const content = msg?.message?.content;
+							if (role === "user") {
+								if (typeof content === "string") {
+									lastUserMsg = content;
+								} else if (Array.isArray(content)) {
+									lastUserMsg = content.filter((b: any) => b?.type === "text").map((b: any) => b.text).join(" ");
+								}
+							} else if (role === "assistant" && Array.isArray(content)) {
+								for (const block of content) {
+									if (block?.type === "tool_use" && block?.name === "Skill" && block?.input?.skill) {
+										const name = block.input.skill;
+										const entry = modeMap.get(name) || { manual: 0, auto: 0 };
+										if (isManualActivation(lastUserMsg, name)) entry.manual++;
+										else entry.auto++;
+										modeMap.set(name, entry);
+									}
+								}
+							}
+						} catch { /* skip malformed lines */ }
+					}
+				} catch { /* skip unreadable files */ }
+			}
+		}
+	} catch { /* skip permission errors */ }
+
+	return modeMap;
+}
+
 export function getGeminiSkillUsage(): Map<string, number> {
 	const skillMap = new Map<string, number>();
 	const fs = require('fs');
@@ -432,3 +504,126 @@ export function getGeminiSkillUsage(): Map<string, number> {
 	return skillMap;
 }
 
+export interface KeywordCoverage {
+	description: string;
+	keywords: string[];
+	hitKeywords: string[];
+	missKeywords: string[];
+	coveragePct: number;
+}
+
+const STOP_WORDS = new Set([
+	"a","an","the","is","are","was","were","be","been","being","have","has","had",
+	"do","does","did","will","would","could","should","may","might","must","shall",
+	"can","need","used","use","uses","using","when","where","how","why","what",
+	"which","who","this","that","these","those","and","or","but","if","of","in",
+	"on","to","for","at","by","with","from","about","into","through","as","up",
+	"also","just","not","no","only","some","any","all","both","more","most",
+	"other","such","than","then","well","per","via","its","your","their",
+	"help","helps","user","users","work","works","file","files","new","get",
+	"set","run","add","edit","read","write","make","let","give","show","find",
+	"them","they","their","you","our","we","data","type","list","item","each",
+	"time","way","part","form","line","single","simple","basic","general",
+	"specific","current","available","support","supports","include","includes",
+	"provides","provide","allow","allows","create","creates","manage","manages"
+]);
+
+function extractKeywords(description: string): string[] {
+	return [...new Set(
+		description
+			.toLowerCase()
+			.replace(/[^a-z0-9\s-]/g, " ")
+			.split(/\s+/)
+			.filter(w => w.length >= 4 && !STOP_WORDS.has(w))
+	)];
+}
+
+function parseSkillDescription(skillMd: string): string {
+	const match = skillMd.match(/^---[\s\S]*?description:\s*["']?(.+?)["']?\s*\n[\s\S]*?---/m);
+	return match ? match[1].trim() : "";
+}
+
+export function getSkillKeywordCoverage(): Map<string, KeywordCoverage> {
+	const fs = require("fs");
+	const path = require("path");
+	const home = require("os").homedir();
+	const skillsDir = path.join(home, ".claude", "skills");
+	const projectsDir = path.join(home, ".claude", "projects");
+	const result = new Map<string, KeywordCoverage>();
+
+	// Read skill descriptions
+	const descriptions = new Map<string, string>();
+	if (fs.existsSync(skillsDir)) {
+		for (const skillName of fs.readdirSync(skillsDir)) {
+			const skillMdPath = path.join(skillsDir, skillName, "SKILL.md");
+			if (!fs.existsSync(skillMdPath)) continue;
+			try {
+				const desc = parseSkillDescription(fs.readFileSync(skillMdPath, "utf-8"));
+				if (desc) descriptions.set(skillName, desc);
+			} catch { /* skip */ }
+		}
+	}
+	if (descriptions.size === 0) return result;
+
+	// Collect user messages per skill activation (last 30d)
+	const activationMessages = new Map<string, string[]>();
+	const now = Date.now();
+	const thirtyDaysAgo = now - 30 * 24 * 60 * 60 * 1000;
+
+	if (fs.existsSync(projectsDir)) {
+		try {
+			for (const project of fs.readdirSync(projectsDir)) {
+				const projectPath = path.join(projectsDir, project);
+				if (!fs.statSync(projectPath).isDirectory()) continue;
+				for (const file of fs.readdirSync(projectPath).filter((f: string) => f.endsWith(".jsonl"))) {
+					try {
+						const lines = fs.readFileSync(path.join(projectPath, file), "utf-8").split("\n");
+						let lastUserMsg = "";
+						for (const line of lines) {
+							if (!line.trim()) continue;
+							try {
+								const msg = JSON.parse(line);
+								if (msg.timestamp && new Date(msg.timestamp).getTime() < thirtyDaysAgo) continue;
+								const role = msg?.message?.role;
+								const content = msg?.message?.content;
+								if (role === "user") {
+									lastUserMsg = typeof content === "string"
+										? content
+										: Array.isArray(content) ? content.filter((b: any) => b?.type === "text").map((b: any) => b.text).join(" ") : "";
+								} else if (role === "assistant" && Array.isArray(content)) {
+									for (const block of content) {
+										if (block?.type === "tool_use" && block?.name === "Skill" && block?.input?.skill) {
+											const name = block.input.skill;
+											if (!activationMessages.has(name)) activationMessages.set(name, []);
+											if (lastUserMsg) activationMessages.get(name)!.push(lastUserMsg.toLowerCase());
+										}
+									}
+								}
+							} catch { /* skip */ }
+						}
+					} catch { /* skip */ }
+				}
+			}
+		} catch { /* skip */ }
+	}
+
+	// Build coverage per skill that has both a description and activations
+	for (const [skillName, desc] of descriptions) {
+		const msgs = activationMessages.get(skillName);
+		if (!msgs || msgs.length === 0) continue;
+		const keywords = extractKeywords(desc);
+		if (keywords.length === 0) continue;
+		const combined = msgs.join(" ");
+		const hitKeywords = keywords.filter(kw => combined.includes(kw));
+		const missKeywords = keywords.filter(kw => !combined.includes(kw));
+		result.set(skillName, {
+			description: desc,
+			keywords,
+			hitKeywords,
+			missKeywords,
+			coveragePct: Math.round((hitKeywords.length / keywords.length) * 100),
+		});
+	}
+
+	return result;
+}

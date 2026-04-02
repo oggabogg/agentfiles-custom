@@ -288,6 +288,8 @@ export class DashboardPanel {
 			if (burn) this.renderBurn(burn);
 		}
 
+		this.renderActivationModes();
+		this.renderKeywordCoverage();
 		if (data.health) this.renderStale(data.health);
 	}
 
@@ -563,6 +565,79 @@ export class DashboardPanel {
 				cls: "as-stale-more",
 				text: `+${health.usage.never_used.length - 20} more`,
 			});
+		}
+	}
+
+	private renderKeywordCoverage(): void {
+		const coverage = skillkit.getSkillKeywordCoverage();
+		const skills = Array.from(coverage.entries())
+			.sort((a, b) => a[1].coveragePct - b[1].coveragePct);
+
+		if (skills.length === 0) return;
+
+		const section = this.containerEl.createDiv("as-dash-section");
+		section.createDiv({ cls: "as-dash-title", text: "Trigger Keyword Coverage (30d)" });
+		section.createDiv({ cls: "as-tq-hint", text: "green = keyword appeared in real activations · gray = never seen in any activation" });
+
+		const list = section.createDiv("as-kc-list");
+		for (const [name, cov] of skills) {
+			const row = list.createDiv("as-kc-row");
+
+			const header = row.createDiv("as-kc-header");
+			header.createSpan({ cls: "as-kc-name", text: name });
+			const pctCls = cov.coveragePct >= 70 ? "as-kc-pct-good" : cov.coveragePct >= 40 ? "as-kc-pct-mid" : "as-kc-pct-low";
+			header.createSpan({ cls: `as-kc-pct ${pctCls}`, text: `${cov.coveragePct}%` });
+
+			const chips = row.createDiv("as-kc-chips");
+			for (const kw of cov.hitKeywords) {
+				chips.createSpan({ cls: "as-kc-chip as-kc-hit", text: kw });
+			}
+			for (const kw of cov.missKeywords) {
+				chips.createSpan({ cls: "as-kc-chip as-kc-miss", text: kw });
+			}
+		}
+	}
+
+	private renderActivationModes(): void {
+		const modes = skillkit.getClaudeCodeActivationModes();
+		const skills = Array.from(modes.entries())
+			.filter(([, m]) => m.manual + m.auto > 0)
+			.sort((a, b) => {
+				const ratioA = a[1].manual / (a[1].manual + a[1].auto);
+				const ratioB = b[1].manual / (b[1].manual + b[1].auto);
+				return ratioB - ratioA;
+			});
+
+		if (skills.length === 0) return;
+
+		const section = this.containerEl.createDiv("as-dash-section");
+		section.createDiv({ cls: "as-dash-title", text: "Trigger Quality (30d)" });
+		section.createDiv({ cls: "as-tq-hint", text: "auto = trigger matched on its own · manual = you asked for it by name" });
+
+		const list = section.createDiv("as-tq-list");
+		for (const [name, { manual, auto }] of skills) {
+			const total = manual + auto;
+			const autoPct = Math.round((auto / total) * 100);
+			const manualPct = 100 - autoPct;
+
+			const row = list.createDiv("as-tq-row");
+			row.createSpan({ cls: "as-tq-name", text: name });
+
+			const barWrap = row.createDiv("as-tq-bar");
+			if (auto > 0) {
+				const autoFill = barWrap.createDiv("as-tq-auto");
+				autoFill.setCssProps({ "--bar-w": `${autoPct}%` });
+				autoFill.title = `Auto: ${auto}`;
+			}
+			if (manual > 0) {
+				const manualFill = barWrap.createDiv("as-tq-manual");
+				manualFill.setCssProps({ "--bar-w": `${manualPct}%` });
+				manualFill.title = `Manual: ${manual}`;
+			}
+
+			const label = row.createDiv("as-tq-label");
+			label.createSpan({ cls: "as-tq-auto-pct", text: `${autoPct}% auto` });
+			label.createSpan({ cls: "as-tq-total", text: `${total}x` });
 		}
 	}
 }
