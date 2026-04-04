@@ -4,6 +4,39 @@ import * as skillkit from "../skillkit";
 import { updateAllSkillsAsync } from "../marketplace";
 import { showConfirmModal } from "./confirm-modal";
 
+const DASHBOARD_BUILTIN_TOOLS = new Set([
+	"Read", "Write", "Edit", "MultiEdit", "Bash", "Glob", "Grep",
+	"WebSearch", "WebFetch", "TodoRead", "TodoWrite", "Task", "Agent",
+	"Skill", "LSP", "NotebookEdit", "AskFollowupQuestion",
+	"AttemptCompletion", "SearchReplace", "InsertCodeBlock",
+	"ReadImages", "ExecuteCommand", "ListFiles", "SearchFiles",
+	"ReadFile", "WriteFile", "ReplaceInFile", "ListCodeDefinitionNames",
+	"BrowserAction", "UseMcp", "shell", "shell_command",
+	"update_plan", "create_plan", "read_file", "write_file",
+	"execute_command", "spawn_agent", "write_stdin",
+	"multi_tool_use.parallel",
+]);
+
+function isDashboardSkill(name: string): boolean {
+	if (DASHBOARD_BUILTIN_TOOLS.has(name)) return false;
+	if (DashboardPanel.CORE_TOOLS.has(name)) return false;
+	if (name.startsWith("mcp__") || name.startsWith("mcp_")) return false;
+	return true;
+}
+
+function filterStatsSkills(stats: StatsJson): StatsJson {
+	const filtered = stats.top_skills.filter((s) => isDashboardSkill(s.name));
+	const removedTotal = stats.top_skills
+		.filter((s) => !isDashboardSkill(s.name))
+		.reduce((sum, s) => sum + s.total, 0);
+	return {
+		...stats,
+		top_skills: filtered,
+		total_invocations: Math.max(0, stats.total_invocations - removedTotal),
+		unique_skills: filtered.length,
+	};
+}
+
 interface StatsJson {
 	period: { days: number };
 	total_invocations: number;
@@ -28,7 +61,7 @@ interface BurnAgent {
 	agent: string;
 	cost: { total: number };
 	period: { days: number; sessions: number; api_calls: number };
-	by_day: { date: string; costUsd: number }[];
+	by_day: { date: string; costUsd: number; apiCalls?: number }[];
 	by_model: { model: string; apiCalls: number; costUsd: number }[];
 }
 
@@ -69,8 +102,6 @@ function enrichDataWithGemini(data: DashboardData): void {
 	}
 
 	if (data.context) {
-		const claudeBurn = data.burns.find(b => b.agent === "Claude Code");
-		
 		data.context.always_loaded.memory_tokens = geminiTax.memory || 0;
 		data.context.always_loaded.gemini_md_tokens = geminiTax.geminiMd || 0;
 		// Prefer direct file-read (geminiTax.claudeMd), fall back to skillkit's own
@@ -81,24 +112,22 @@ function enrichDataWithGemini(data: DashboardData): void {
 		} else if (!data.context.always_loaded.claude_md_tokens) {
 			data.context.always_loaded.claude_md_tokens = 0;
 		}
-		
-		// Vi legger til tokens brukt i denne perioden for å vise "tax" mer dynamisk hvis ønskelig, 
-		// men for nå holder vi oss til de "always loaded" tokens som før.
-		data.context.always_loaded.total_tokens = 
-			data.context.always_loaded.claude_md_tokens + 
-			data.context.always_loaded.gemini_md_tokens + 
-			data.context.always_loaded.memory_tokens + 
+
+		data.context.always_loaded.total_tokens =
+			data.context.always_loaded.claude_md_tokens +
+			data.context.always_loaded.gemini_md_tokens +
+			data.context.always_loaded.memory_tokens +
 			data.context.always_loaded.skill_metadata_tokens || 500;
 	}
 
 	if (data.stats && data.stats.top_skills) {
 		// Filter ut kjerne-verktøy fra skillkit-data
-		data.stats.top_skills = data.stats.top_skills.filter(s => !DashboardPanel.CORE_TOOLS.has(s.name));
+		data.stats.top_skills = data.stats.top_skills.filter(s => isDashboardSkill(s.name));
 
 		geminiUsage.forEach((count, name) => {
-			const existing = data.stats.top_skills.find(s => s.name === name);
+			const existing = data.stats!.top_skills.find(s => s.name === name);
 			if (existing) existing.total += count;
-			else if (!DashboardPanel.CORE_TOOLS.has(name)) {
+			else if (isDashboardSkill(name)) {
 				data.stats!.top_skills.push({ name, total: count, daily: [] });
 			}
 		});
@@ -107,11 +136,11 @@ function enrichDataWithGemini(data: DashboardData): void {
 
 	if (data.health) {
 		// Rens never_used for kjerne-verktøy (hvis skillkit har plukket dem opp)
-		data.health.usage.never_used = data.health.usage.never_used.filter(name => !DashboardPanel.CORE_TOOLS.has(name));
+		data.health.usage.never_used = data.health.usage.never_used.filter(name => isDashboardSkill(name));
 
 		// Finn unike brukte skills fra Gemini som ikke er kjerne-verktøy
 		geminiUsage.forEach((count, name) => {
-			if (count > 0 && !DashboardPanel.CORE_TOOLS.has(name)) {
+			if (count > 0 && isDashboardSkill(name)) {
 				const idx = data.health!.usage.never_used.indexOf(name);
 				if (idx !== -1) {
 					data.health!.usage.never_used.splice(idx, 1);
@@ -169,9 +198,11 @@ import { join } from "path";
 import { homedir } from "os";
 
 const CACHE_FILE = join(homedir(), ".skillkit", "dashboard-cache.json");
+const CACHE_TTL = 300_000;
 
 let cachedData: DashboardData | null = null;
 let cachedAt: number | null = null;
+let refreshing = false;
 
 function loadDiskCache(): void {
 	if (cachedData) return;
@@ -214,6 +245,9 @@ export class DashboardPanel {
 			if (cachedData) {
 				enrichDataWithGemini(cachedData);
 				this.renderDashboard(cachedData);
+				if (!refreshing && cachedAt && Date.now() - cachedAt > CACHE_TTL) {
+					this.refreshInBackground();
+				}
 			} else {
 				const loading = this.containerEl.createDiv("as-dash-loading");
 				loading.createDiv("as-dash-spinner");
@@ -236,6 +270,22 @@ export class DashboardPanel {
 		} catch (e) {
 			this.renderError(e);
 		}
+	}
+
+	private refreshInBackground(): void {
+		refreshing = true;
+		setTimeout(() => {
+			const data = loadData();
+			cachedData = data;
+			cachedAt = Date.now();
+			saveDiskCache();
+			refreshing = false;
+			if (this.containerEl.hasClass("as-dashboard")) {
+				this.containerEl.empty();
+				this.containerEl.addClass("as-dashboard");
+				this.renderDashboard(data);
+			}
+		}, 100);
 	}
 
 	private renderError(e: any): void {
@@ -272,17 +322,17 @@ export class DashboardPanel {
 		"save_memory"
 	]);
 
-
 	private renderDashboard(data: DashboardData): void {
 		this.renderActionBar(data);
-		if (data.stats) this.renderOverview(data.stats, data.health);
-		if (data.stats) this.renderTopSkills(data.stats);
+		const filteredStats = data.stats ? filterStatsSkills(data.stats) : null;
+		if (filteredStats) this.renderOverview(filteredStats, data.health);
+		if (filteredStats) this.renderTopSkills(filteredStats);
 		if (data.health || data.context) {
 			const row = this.containerEl.createDiv("as-dash-row");
 			if (data.health) this.renderHealth(data.health, row);
 			if (data.context) this.renderContext(data.context, row);
 		}
-		
+
 		const burns = data.burns || [];
 		for (const burn of burns) {
 			if (burn) this.renderBurn(burn);
@@ -481,7 +531,7 @@ export class DashboardPanel {
 		this.statCard(stats, `$${totalCost}`, "total cost", "flame");
 		this.statCard(stats, `$${dailyAvgStr}`, "daily avg", "trending-up");
 		this.statCard(stats, `${(burn.period.sessions || 0).toLocaleString()}`, "sessions", "terminal");
-		
+
 		const apiCalls = burn.period.api_calls;
 		const apiCallsStr = apiCalls >= 1000 ? `${(apiCalls / 1000).toFixed(1)}k` : String(apiCalls);
 		this.statCard(stats, apiCallsStr, "API calls", "zap");
@@ -503,17 +553,17 @@ export class DashboardPanel {
 		if (last14.length === 0) return;
 
 		const useCalls = burn.cost.total === 0;
-		const maxValue = Math.max(...last14.map((d) => useCalls ? d.apiCalls : d.costUsd), 1);
+		const maxValue = Math.max(...last14.map((d) => useCalls ? (d.apiCalls ?? 0) : d.costUsd), 1);
 		const chart = section.createDiv("as-burn-chart");
 
 		for (const day of last14) {
 			const col = chart.createDiv("as-burn-col");
 			const bar = col.createDiv("as-burn-bar");
-			const val = useCalls ? day.apiCalls : day.costUsd;
+			const val = useCalls ? (day.apiCalls ?? 0) : day.costUsd;
 			const height = Math.max(2, (val / maxValue) * 100);
 			bar.setCssProps({ "--bar-h": `${height}%` });
 			const costStr = day.costUsd < 1 && day.costUsd > 0 ? day.costUsd.toFixed(2) : day.costUsd.toFixed(0);
-			bar.title = `${day.date}: ${useCalls ? day.apiCalls + " calls" : "$" + costStr}`;
+			bar.title = `${day.date}: ${useCalls ? (day.apiCalls ?? 0) + " calls" : "$" + costStr}`;
 			col.createDiv({ cls: "as-burn-date", text: day.date.slice(8) });
 		}
 	}

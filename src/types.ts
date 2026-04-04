@@ -78,13 +78,59 @@ export interface ChopsSettings {
 	packageRunner: "auto" | "npx" | "bunx";
 }
 
+export interface ConversationMessage {
+	role: "human" | "assistant";
+	text: string;
+	timestamp: string;
+	toolCalls?: string[];
+}
+
+export interface ConversationItem {
+	id: string;
+	uuid: string;
+	project: string;
+	projectPath: string;
+	title: string;
+	messages: ConversationMessage[];
+	messageCount: number;
+	firstTimestamp: string;
+	lastTimestamp: string;
+	tags: string[];
+	customTags: string[];
+	isFavorite: boolean;
+	filePath: string;
+	source?: "claude" | "gemini";
+}
+
+export type ConversationSort = "date" | "messages";
+export type ConversationDateRange = "all" | "today" | "7d" | "30d" | "90d" | "180d";
+
+export type ConversationFilter =
+	| { kind: "all-conversations" }
+	| { kind: "conversation-project"; project: string }
+	| { kind: "conversation-tag"; tag: string }
+	| { kind: "conversation-favorites" };
+
+export interface ConversationTagData {
+	customTags: Record<string, string[]>;
+	favorites: string[];
+}
+
+export const DEFAULT_CONVERSATION_TAG_DATA: ConversationTagData = {
+	customTags: {},
+	favorites: [],
+};
+
 export const DEFAULT_SETTINGS: ChopsSettings = {
 	tools: {},
 	watchEnabled: true,
 	watchDebounceMs: 500,
+	deepSearchDefault: false,
+	deepSearchScope: "both",
 	favorites: [],
 	collections: {},
 	customScanPaths: [],
+	namingMode: "auto",
 	projectScanEnabled: true,
 	projectsHomeDir: "",
 	packageRunner: "auto",

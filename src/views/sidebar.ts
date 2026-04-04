@@ -4,30 +4,48 @@ import { TOOL_CONFIGS } from "../tool-configs";
 import { TOOL_SVGS, renderToolIcon } from "../tool-icons";
 import type { SkillStore } from "../store";
 import type { SidebarFilter } from "../types";
+import type { ConversationStore } from "../conversations/store";
 
 export class SidebarPanel {
 	private containerEl: HTMLElement;
 	private store: SkillStore;
 	private onToggleDashboard: () => void;
 	private onToggleMarketplace: () => void;
+	private onCreateSkill: () => void;
+	private onToggleConversations: () => void;
+	private conversationStore: ConversationStore | null;
 	private dashboardActive = false;
 	private marketplaceActive = false;
+	private conversationsActive = false;
 
-	constructor(containerEl: HTMLElement, store: SkillStore, onToggleDashboard: () => void, onToggleMarketplace: () => void) {
+	constructor(
+		containerEl: HTMLElement,
+		store: SkillStore,
+		onToggleDashboard: () => void,
+		onToggleMarketplace: () => void,
+		onCreateSkill: () => void,
+		onToggleConversations?: () => void,
+		conversationStore?: ConversationStore
+	) {
 		this.containerEl = containerEl;
 		this.store = store;
 		this.onToggleDashboard = onToggleDashboard;
 		this.onToggleMarketplace = onToggleMarketplace;
+		this.onCreateSkill = onCreateSkill;
+		this.onToggleConversations = onToggleConversations || (() => {});
+		this.conversationStore = conversationStore || null;
 	}
 
 	setDashboardActive(active: boolean): void {
 		this.dashboardActive = active;
-		if (active) this.marketplaceActive = false;
 	}
 
 	setMarketplaceActive(active: boolean): void {
 		this.marketplaceActive = active;
-		if (active) this.dashboardActive = false;
+	}
+
+	setConversationsActive(active: boolean): void {
+		this.conversationsActive = active;
 	}
 
 	render(): void {
@@ -35,13 +53,18 @@ export class SidebarPanel {
 		this.containerEl.addClass("as-sidebar");
 
 		this.renderLibrarySection();
-		this.renderTypeSection();
-		this.renderToolSection();
-		this.renderProjectSection();
-		this.renderCollectionSection();
 
-		if (!this.store.hasSkillkit) {
-			this.renderSkillkitCta();
+		if (this.conversationsActive && this.conversationStore) {
+			this.renderConversationFilters();
+		} else {
+			this.renderTypeSection();
+			this.renderToolSection();
+			this.renderProjectSection();
+			this.renderCollectionSection();
+
+			if (!this.store.hasSkillkit) {
+				this.renderSkillkitCta();
+			}
 		}
 	}
 
@@ -193,7 +216,7 @@ export class SidebarPanel {
 			{ label: "Favorites", icon: "star", filter: { kind: "favorites" } },
 		];
 
-		const isSpecialView = this.dashboardActive || this.marketplaceActive;
+		const isSpecialView = this.dashboardActive || this.marketplaceActive || this.conversationsActive;
 
 		for (const item of libraryItems) {
 			const row = section.createDiv("as-sidebar-item");
@@ -206,6 +229,7 @@ export class SidebarPanel {
 			row.addEventListener("click", () => {
 				if (this.dashboardActive) this.onToggleDashboard();
 				if (this.marketplaceActive) this.onToggleMarketplace();
+				if (this.conversationsActive) this.onToggleConversations();
 				this.store.setFilter(item.filter);
 			});
 		}
@@ -217,6 +241,7 @@ export class SidebarPanel {
 		dashRow.createSpan({ cls: "as-sidebar-label", text: "Dashboard" });
 		dashRow.addEventListener("click", () => {
 			if (this.marketplaceActive) this.onToggleMarketplace();
+			if (this.conversationsActive) this.onToggleConversations();
 			if (!this.dashboardActive) this.onToggleDashboard();
 		});
 
@@ -227,8 +252,26 @@ export class SidebarPanel {
 		mpRow.createSpan({ cls: "as-sidebar-label", text: "Marketplace" });
 		mpRow.addEventListener("click", () => {
 			if (this.dashboardActive) this.onToggleDashboard();
+			if (this.conversationsActive) this.onToggleConversations();
 			if (!this.marketplaceActive) this.onToggleMarketplace();
 		});
+
+		const convRow = section.createDiv("as-sidebar-item");
+		if (this.conversationsActive) convRow.addClass("is-active");
+		const convIcon = convRow.createSpan("as-sidebar-icon");
+		setIcon(convIcon, "message-circle");
+		convRow.createSpan({ cls: "as-sidebar-label", text: "Conversations" });
+		convRow.addEventListener("click", () => {
+			if (this.dashboardActive) this.onToggleDashboard();
+			if (this.marketplaceActive) this.onToggleMarketplace();
+			if (!this.conversationsActive) this.onToggleConversations();
+		});
+
+		const createRow = section.createDiv("as-sidebar-item as-sidebar-create");
+		const createIcon = createRow.createSpan("as-sidebar-icon");
+		setIcon(createIcon, "plus");
+		createRow.createSpan({ cls: "as-sidebar-label", text: "Create" });
+		createRow.addEventListener("click", () => this.onCreateSkill());
 	}
 
 	private renderSkillkitCta(): void {
@@ -241,16 +284,62 @@ export class SidebarPanel {
 			text: "Install skillkit to see usage stats, stale badges, and heavy skill warnings.",
 		});
 		const cmd = cta.createDiv("as-skillkit-cmd");
-		cmd.createEl("code", { text: "npm i -g skillkit" });
+		cmd.createEl("code", { text: "npm i -g @crafter/skillkit" });
 		const link = cta.createEl("a", {
 			cls: "as-skillkit-link",
 			text: "Learn more",
-			href: "https://www.npmjs.com/package/skillkit",
+			href: "https://www.npmjs.com/package/@crafter/skillkit",
 		});
 		link.addEventListener("click", (e) => {
 			e.preventDefault();
-			void shell.openExternal("https://www.npmjs.com/package/skillkit");
+			void shell.openExternal("https://www.npmjs.com/package/@crafter/skillkit");
 		});
+	}
+
+	private renderConversationFilters(): void {
+		if (!this.conversationStore) return;
+
+		// Projects
+		const projCounts = this.conversationStore.getProjectCounts();
+		if (projCounts.size > 0) {
+			const section = this.containerEl.createDiv("as-sidebar-section");
+			section.createDiv({ cls: "as-sidebar-title", text: "Projects" });
+
+			const allRow = section.createDiv("as-sidebar-item");
+			const convFilter = this.conversationStore.filter;
+			if (convFilter.kind === "all-conversations") allRow.addClass("is-active");
+			const allIcon = allRow.createSpan("as-sidebar-icon");
+			setIcon(allIcon, "layers");
+			allRow.createSpan({ cls: "as-sidebar-label", text: "All" });
+			allRow.createSpan({ cls: "as-sidebar-count", text: String(this.conversationStore.allItems.length) });
+			allRow.addEventListener("click", () => {
+				this.conversationStore!.setFilter({ kind: "all-conversations" });
+			});
+
+			const favRow = section.createDiv("as-sidebar-item");
+			if (convFilter.kind === "conversation-favorites") favRow.addClass("is-active");
+			const favIcon = favRow.createSpan("as-sidebar-icon");
+			setIcon(favIcon, "star");
+			favRow.createSpan({ cls: "as-sidebar-label", text: "Favorites" });
+			favRow.addEventListener("click", () => {
+				this.conversationStore!.setFilter({ kind: "conversation-favorites" });
+			});
+
+			for (const [project, count] of Array.from(projCounts.entries()).sort((a, b) => b[1] - a[1])) {
+				const row = section.createDiv("as-sidebar-item");
+				if (convFilter.kind === "conversation-project" && convFilter.project === project) {
+					row.addClass("is-active");
+				}
+				const icon = row.createSpan("as-sidebar-icon");
+				setIcon(icon, "folder-git-2");
+				row.createSpan({ cls: "as-sidebar-label", text: project });
+				row.createSpan({ cls: "as-sidebar-count", text: String(count) });
+				row.addEventListener("click", () => {
+					this.conversationStore!.setFilter({ kind: "conversation-project", project });
+				});
+			}
+		}
+
 	}
 
 	private isActive(filter: SidebarFilter): boolean {
