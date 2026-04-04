@@ -339,14 +339,20 @@ export function getGeminiContextTax(): GeminiContextTax {
 	const home = require('os').homedir();
 	const getTokens = (p: string) => fs.existsSync(p) ? Math.ceil(fs.statSync(p).size / 4) : 0;
 
-	// Scan for CLAUDE.md files across global and project directories
+	// Scan for CLAUDE.md files across global and project directories (up to 2 levels deep)
 	const SKIP_DIRS = new Set(["node_modules", ".Trash", "Library", "Applications", "Music", "Movies", "Pictures", "Public"]);
 	let claudeMdTokens = getTokens(path.join(home, ".claude", "CLAUDE.md"));
 	try {
 		for (const entry of fs.readdirSync(home, { withFileTypes: true })) {
 			if ((!entry.isDirectory() && !entry.isSymbolicLink()) || SKIP_DIRS.has(entry.name)) continue;
-			const claudeMd = path.join(home, entry.name, "CLAUDE.md");
-			claudeMdTokens += getTokens(claudeMd);
+			const l1 = path.join(home, entry.name);
+			claudeMdTokens += getTokens(path.join(l1, "CLAUDE.md"));
+			try {
+				for (const sub of fs.readdirSync(l1, { withFileTypes: true })) {
+					if ((!sub.isDirectory() && !sub.isSymbolicLink()) || SKIP_DIRS.has(sub.name)) continue;
+					claudeMdTokens += getTokens(path.join(l1, sub.name, "CLAUDE.md"));
+				}
+			} catch { /* skip */ }
 		}
 	} catch { /* permission errors */ }
 
